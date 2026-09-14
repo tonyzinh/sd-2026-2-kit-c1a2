@@ -1,13 +1,19 @@
 """
 Interface gRPC do servico de inferencia.
 
-PRE-REQUISITO: gerar os stubs antes de rodar (veja scripts/gerar_stubs).
+PRE-REQUISITO:
+Gerar os stubs antes de rodar.
 
-O QUE JA ESTA PRONTO: o metodo Prever.
-O QUE VOCE PRECISA FAZER (TAREFAS.md, item 4): o metodo PreverLote.
+O QUE JA ESTA PRONTO:
+- metodo Prever
 
-Rodar:  python -m app.servidor_grpc
+TAREFA:
+- implementar PreverLote
+
+Rodar:
+    python -m app.servidor_grpc
 """
+
 from concurrent import futures
 
 import grpc
@@ -25,31 +31,64 @@ except ImportError:  # pragma: no cover
     )
 
 
-class ServicoInferencia(inferencia_pb2_grpc.InferenciaServicer):
-
+class ServicoInferencia(
+    inferencia_pb2_grpc.InferenciaServicer
+):
     def __init__(self):
         print("[grpc] carregando modelo...")
         self.modelo = carregar_modelo()
         print("[grpc] modelo pronto")
 
-    def Prever(self, request, context):
-        r = self.modelo.prever(request.texto)
+    def _converter_resposta(self, resultado: dict):
+        """Converte o resultado do modelo para a resposta protobuf."""
         return inferencia_pb2.RespostaPrever(
-            texto=r["texto"], sentimento=r["sentimento"], confianca=r["confianca"]
+            texto=resultado["texto"],
+            sentimento=resultado["sentimento"],
+            confianca=resultado["confianca"],
         )
 
-    # TAREFA 4: implemente PreverLote, recebendo varios textos de uma vez.
-    # def PreverLote(self, request, context):
-    #     ...
+    def Prever(self, request, context):
+        """Executa inferencia de um unico texto."""
+        resultado = self.modelo.prever(request.texto)
+
+        return self._converter_resposta(resultado)
+
+    def PreverLote(self, request, context):
+        """Executa inferencia para varios textos."""
+        resultados = [
+            self._converter_resposta(
+                self.modelo.prever(texto)
+            )
+            for texto in request.textos
+        ]
+
+        return inferencia_pb2.RespostaLote(
+            resultados=resultados
+        )
 
 
 def servir(porta: int = 50051):
-    servidor = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    servidor = grpc.server(
+        futures.ThreadPoolExecutor(
+            max_workers=10
+        )
+    )
+
     inferencia_pb2_grpc.add_InferenciaServicer_to_server(
-        ServicoInferencia(), servidor)
-    servidor.add_insecure_port(f"[::]:{porta}")
+        ServicoInferencia(),
+        servidor,
+    )
+
+    servidor.add_insecure_port(
+        f"[::]:{porta}"
+    )
+
     servidor.start()
-    print(f"[grpc] escutando na porta {porta}")
+
+    print(
+        f"[grpc] escutando na porta {porta}"
+    )
+
     servidor.wait_for_termination()
 
 
