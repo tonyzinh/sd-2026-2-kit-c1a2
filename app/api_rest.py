@@ -2,24 +2,43 @@
 Interface REST do servico de inferencia.
 
 O QUE JA ESTA PRONTO:
-  - carregamento do modelo UMA vez, na subida (nao a cada requisicao)
-  - rota sincrona /predict-sync, usada no laboratorio da Aula 6
 
-O QUE VOCE PRECISA FAZER (TAREFAS.md, itens 1 e 2):
-  - POST /predict  -> colocar na fila e devolver o id
-  - GET  /resultado/{id} -> devolver o resultado quando estiver pronto
+- carregamento do modelo UMA vez, na subida
+- rota sincrona /predict-sync, usada no laboratorio da Aula 6
 
-Rodar:  uvicorn app.api_rest:app --reload --port 8000
-Docs:   http://localhost:8000/docs
+TAREFAS:
+
+- POST /predict -> colocar na fila e devolver o id
+- GET /resultado/{id} -> devolver o resultado quando estiver pronto
+
+Rodar:
+    uvicorn app.api_rest:app --reload --host 0.0.0.0 --port 8000
+
+Docs:
+    http://localhost:8000/docs
 """
+
 import time
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.modelo import carregar_modelo
+from app.services.inferencia_service import (
+    FilaIndisponivelError,
+    TarefaNaoEncontradaError,
+    TextoInvalidoError,
+    consultar_resultado,
+    submeter_inferencia,
+)
 
-app = FastAPI(title="Servico de Inferencia - C1.A2", version="0.1.0")
+
+app = FastAPI(
+    title="Servico de Inferencia - C1.A2",
+    version="0.1.0",
+)
+
 
 modelo = None
 
@@ -28,46 +47,91 @@ class Entrada(BaseModel):
     texto: str
 
 
+@app.exception_handler(TextoInvalidoError)
+async def tratar_texto_invalido(
+    request: Request,
+    exc: TextoInvalidoError,
+):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(TarefaNaoEncontradaError)
+async def tratar_tarefa_nao_encontrada(
+    request: Request,
+    exc: TarefaNaoEncontradaError,
+):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(FilaIndisponivelError)
+async def tratar_fila_indisponivel(
+    request: Request,
+    exc: FilaIndisponivelError,
+):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+    )
+
+
 @app.on_event("startup")
 def _subir():
     """Carrega o modelo UMA vez. Este e o ponto-chave da Aula 6."""
     global modelo
+
     inicio = time.time()
     modelo = carregar_modelo()
-    print(f"[startup] modelo carregado em {time.time() - inicio:.3f}s")
+
+    print(
+        f"[startup] modelo carregado em "
+        f"{time.time() - inicio:.3f}s"
+    )
 
 
 @app.get("/saude")
 def saude():
-    return {"status": "ok", "modelo_carregado": modelo is not None}
+    return {
+        "status": "ok",
+        "modelo_carregado": modelo is not None,
+    }
 
 
 @app.post("/predict-sync")
 def predict_sync(entrada: Entrada):
-    """Inferencia SINCRONA: o cliente espera a resposta. Lab da Aula 6."""
+    """Inferencia SINCRONA: o cliente espera a resposta."""
     if not entrada.texto.strip():
-        raise HTTPException(status_code=400, detail="texto vazio")
+        raise HTTPException(
+            status_code=400,
+            detail="texto vazio",
+        )
+
     inicio = time.time()
+
     resultado = modelo.prever(entrada.texto)
-    resultado["tempo_ms"] = round((time.time() - inicio) * 1000, 2)
+
+    resultado["tempo_ms"] = round(
+        (time.time() - inicio) * 1000,
+        2,
+    )
+
     return resultado
 
 
-# ------------------------------------------------------------------
-# TAREFA 1 - submissao assincrona
-# ------------------------------------------------------------------
-# @app.post("/predict", status_code=202)
-# def predict(entrada: Entrada):
-#     """Deve enfileirar a tarefa e devolver {"id": ...} SEM esperar."""
-#     # DICA: use app.fila.enfileirar(entrada.texto)
-#     raise NotImplementedError("implemente a submissao assincrona")
+@app.post("/predict", status_code=202)
+def predict(entrada: Entrada):
+    """Submete uma inferencia para processamento assincrono."""
+    return {
+        "id": submeter_inferencia(entrada.texto)
+    }
 
 
-# ------------------------------------------------------------------
-# TAREFA 2 - consulta do resultado
-# ------------------------------------------------------------------
-# @app.get("/resultado/{tarefa_id}")
-# def resultado(tarefa_id: str):
-#     """Deve devolver o resultado; 404 se o id nao existir."""
-#     # DICA: use app.fila.buscar_resultado(tarefa_id)
-#     raise NotImplementedError("implemente a consulta de resultado")
+@app.get("/resultado/{tarefa_id}")
+def resultado(tarefa_id: str):
+    """Consulta o estado ou resultado de uma inferencia."""
+    return consultar_resultado(tarefa_id)
