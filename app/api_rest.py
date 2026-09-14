@@ -2,12 +2,10 @@
 Interface REST do servico de inferencia.
 
 O QUE JA ESTA PRONTO:
-
 - carregamento do modelo UMA vez, na subida
 - rota sincrona /predict-sync, usada no laboratorio da Aula 6
 
 TAREFAS:
-
 - POST /predict -> colocar na fila e devolver o id
 - GET /resultado/{id} -> devolver o resultado quando estiver pronto
 
@@ -18,6 +16,7 @@ Docs:
     http://localhost:8000/docs
 """
 
+import logging
 import time
 
 from fastapi import FastAPI, HTTPException, Request
@@ -32,6 +31,14 @@ from app.services.inferencia_service import (
     consultar_resultado,
     submeter_inferencia,
 )
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+logger = logging.getLogger(__name__)
 
 
 app = FastAPI(
@@ -52,9 +59,17 @@ async def tratar_texto_invalido(
     request: Request,
     exc: TextoInvalidoError,
 ):
+    logger.warning(
+        "REST erro de validacao | rota=%s | erro=%s",
+        request.url.path,
+        exc,
+    )
+
     return JSONResponse(
         status_code=400,
-        content={"detail": str(exc)},
+        content={
+            "detail": str(exc),
+        },
     )
 
 
@@ -63,9 +78,17 @@ async def tratar_tarefa_nao_encontrada(
     request: Request,
     exc: TarefaNaoEncontradaError,
 ):
+    logger.warning(
+        "REST tarefa nao encontrada | rota=%s | erro=%s",
+        request.url.path,
+        exc,
+    )
+
     return JSONResponse(
         status_code=404,
-        content={"detail": str(exc)},
+        content={
+            "detail": str(exc),
+        },
     )
 
 
@@ -74,28 +97,52 @@ async def tratar_fila_indisponivel(
     request: Request,
     exc: FilaIndisponivelError,
 ):
+    logger.error(
+        "REST fila indisponivel | rota=%s | erro=%s",
+        request.url.path,
+        exc,
+    )
+
     return JSONResponse(
         status_code=503,
-        content={"detail": str(exc)},
+        content={
+            "detail": str(exc),
+        },
     )
 
 
 @app.on_event("startup")
 def _subir():
-    """Carrega o modelo UMA vez. Este e o ponto-chave da Aula 6."""
+    """
+    Carrega o modelo uma unica vez no startup.
+    """
     global modelo
 
-    inicio = time.time()
+    inicio = time.perf_counter()
+
     modelo = carregar_modelo()
 
-    print(
-        f"[startup] modelo carregado em "
-        f"{time.time() - inicio:.3f}s"
+    tempo_ms = round(
+        (time.perf_counter() - inicio) * 1000,
+        2,
+    )
+
+    logger.info(
+        "REST startup | modelo carregado | tempo_ms=%s",
+        tempo_ms,
     )
 
 
 @app.get("/saude")
 def saude():
+    """
+    Informa se a API esta ativa e se o modelo foi carregado.
+    """
+    logger.info(
+        "REST GET /saude | modelo_carregado=%s",
+        modelo is not None,
+    )
+
     return {
         "status": "ok",
         "modelo_carregado": modelo is not None,
@@ -104,20 +151,31 @@ def saude():
 
 @app.post("/predict-sync")
 def predict_sync(entrada: Entrada):
-    """Inferencia SINCRONA: o cliente espera a resposta."""
+    """
+    Executa inferencia sincrona.
+    O cliente aguarda a resposta.
+    """
     if not entrada.texto.strip():
         raise HTTPException(
             status_code=400,
             detail="texto vazio",
         )
 
-    inicio = time.time()
+    inicio = time.perf_counter()
 
-    resultado = modelo.prever(entrada.texto)
+    resultado = modelo.prever(
+        entrada.texto,
+    )
 
     resultado["tempo_ms"] = round(
-        (time.time() - inicio) * 1000,
+        (time.perf_counter() - inicio) * 1000,
         2,
+    )
+
+    logger.info(
+        "REST POST /predict-sync | tamanho=%s | tempo_ms=%s",
+        len(entrada.texto),
+        resultado["tempo_ms"],
     )
 
     return resultado
@@ -125,13 +183,53 @@ def predict_sync(entrada: Entrada):
 
 @app.post("/predict", status_code=202)
 def predict(entrada: Entrada):
-    """Submete uma inferencia para processamento assincrono."""
+    """
+    Submete uma inferencia para processamento assincrono.
+    """
+    inicio = time.perf_counter()
+
+    tarefa_id = submeter_inferencia(
+        entrada.texto,
+    )
+
+    tempo_ms = round(
+        (time.perf_counter() - inicio) * 1000,
+        2,
+    )
+
+    logger.info(
+        "REST POST /predict | id=%s | tamanho=%s | tempo_ms=%s",
+        tarefa_id,
+        len(entrada.texto),
+        tempo_ms,
+    )
+
     return {
-        "id": submeter_inferencia(entrada.texto)
+        "id": tarefa_id,
     }
 
 
 @app.get("/resultado/{tarefa_id}")
 def resultado(tarefa_id: str):
-    """Consulta o estado ou resultado de uma inferencia."""
-    return consultar_resultado(tarefa_id)
+    """
+    Consulta o estado ou resultado de uma inferencia.
+    """
+    inicio = time.perf_counter()
+
+    resposta = consultar_resultado(
+        tarefa_id,
+    )
+
+    tempo_ms = round(
+        (time.perf_counter() - inicio) * 1000,
+        2,
+    )
+
+    logger.info(
+        "REST GET /resultado/%s | status=%s | tempo_ms=%s",
+        tarefa_id,
+        resposta.get("status"),
+        tempo_ms,
+    )
+
+    return resposta

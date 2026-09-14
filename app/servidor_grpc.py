@@ -4,30 +4,45 @@ Interface gRPC do servico de inferencia.
 PRE-REQUISITO:
 Gerar os stubs antes de rodar.
 
-O QUE JA ESTA PRONTO:
-- metodo Prever
-
-TAREFA:
-- implementar PreverLote
+Comando:
+    python -m grpc_tools.protoc \
+        -I proto \
+        --python_out=. \
+        --grpc_python_out=. \
+        proto/inferencia.proto
 
 Rodar:
     python -m app.servidor_grpc
 """
 
+import logging
+import time
 from concurrent import futures
 
 import grpc
 
 from app.modelo import carregar_modelo
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+
 try:
     import inferencia_pb2
     import inferencia_pb2_grpc
-except ImportError:  # pragma: no cover
+except ImportError:
     raise SystemExit(
         "Stubs nao encontrados. Rode antes:\n"
-        "  python -m grpc_tools.protoc -I proto --python_out=. "
-        "--grpc_python_out=. proto/inferencia.proto"
+        "python -m grpc_tools.protoc "
+        "-I proto "
+        "--python_out=. "
+        "--grpc_python_out=. "
+        "proto/inferencia.proto"
     )
 
 
@@ -35,42 +50,127 @@ class ServicoInferencia(
     inferencia_pb2_grpc.InferenciaServicer
 ):
     def __init__(self):
-        print("[grpc] carregando modelo...")
-        self.modelo = carregar_modelo()
-        print("[grpc] modelo pronto")
+        """
+        Carrega o modelo uma unica vez na inicializacao do servidor.
+        """
+        logger.info(
+            "gRPC carregando modelo",
+        )
 
-    def _converter_resposta(self, resultado: dict):
-        """Converte o resultado do modelo para a resposta protobuf."""
+        self.modelo = carregar_modelo()
+
+        logger.info(
+            "gRPC modelo pronto",
+        )
+
+    def _converter_resposta(
+        self,
+        resultado: dict,
+    ):
+        """
+        Converte o resultado do modelo para mensagem protobuf.
+        """
         return inferencia_pb2.RespostaPrever(
             texto=resultado["texto"],
             sentimento=resultado["sentimento"],
             confianca=resultado["confianca"],
         )
 
-    def Prever(self, request, context):
-        """Executa inferencia de um unico texto."""
-        resultado = self.modelo.prever(request.texto)
+    def Prever(
+        self,
+        request,
+        context,
+    ):
+        """
+        Executa inferencia para um unico texto.
+        """
+        inicio = time.perf_counter()
 
-        return self._converter_resposta(resultado)
-
-    def PreverLote(self, request, context):
-        """Executa inferencia para varios textos."""
-        resultados = [
-            self._converter_resposta(
-                self.modelo.prever(texto)
+        try:
+            resultado = self.modelo.prever(
+                request.texto,
             )
-            for texto in request.textos
-        ]
 
-        return inferencia_pb2.RespostaLote(
-            resultados=resultados
-        )
+            tempo_ms = round(
+                (time.perf_counter() - inicio) * 1000,
+                2,
+            )
+
+            logger.info(
+                "gRPC Prever | tamanho=%s | tempo_ms=%s",
+                len(request.texto),
+                tempo_ms,
+            )
+
+            return self._converter_resposta(
+                resultado,
+            )
+
+        except Exception as erro:
+            logger.exception(
+                "gRPC Prever falhou | erro=%s",
+                erro,
+            )
+
+            context.abort(
+                grpc.StatusCode.INTERNAL,
+                "Falha ao processar inferencia.",
+            )
+
+    def PreverLote(
+        self,
+        request,
+        context,
+    ):
+        """
+        Executa inferencia para varios textos.
+        """
+        inicio = time.perf_counter()
+
+        try:
+            resultados = [
+                self._converter_resposta(
+                    self.modelo.prever(texto)
+                )
+                for texto in request.textos
+            ]
+
+            tempo_ms = round(
+                (time.perf_counter() - inicio) * 1000,
+                2,
+            )
+
+            logger.info(
+                "gRPC PreverLote | quantidade=%s | tempo_ms=%s",
+                len(request.textos),
+                tempo_ms,
+            )
+
+            return inferencia_pb2.RespostaLote(
+                resultados=resultados,
+            )
+
+        except Exception as erro:
+            logger.exception(
+                "gRPC PreverLote falhou | erro=%s",
+                erro,
+            )
+
+            context.abort(
+                grpc.StatusCode.INTERNAL,
+                "Falha ao processar lote.",
+            )
 
 
-def servir(porta: int = 50051):
+def servir(
+    porta: int = 50051,
+):
+    """
+    Inicializa e mantem o servidor gRPC em execucao.
+    """
     servidor = grpc.server(
         futures.ThreadPoolExecutor(
-            max_workers=10
+            max_workers=10,
         )
     )
 
@@ -80,13 +180,14 @@ def servir(porta: int = 50051):
     )
 
     servidor.add_insecure_port(
-        f"[::]:{porta}"
+        f"[::]:{porta}",
     )
 
     servidor.start()
 
-    print(
-        f"[grpc] escutando na porta {porta}"
+    logger.info(
+        "gRPC servidor escutando | porta=%s",
+        porta,
     )
 
     servidor.wait_for_termination()
