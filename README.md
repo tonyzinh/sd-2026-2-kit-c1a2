@@ -96,7 +96,7 @@ Implementado em `worker.py`:
 
 Pré-requisitos: **Python 3.12+**, **Docker** (para o Redis) e **git**.
 
-> ⚠️ **Importante — ambiente virtual (`.venv`):** este projeto usa vários
+> **Importante — ambiente virtual (`.venv`):** este projeto usa vários
 > processos rodando ao mesmo tempo, cada um no seu próprio terminal. **Todo
 > terminal novo abre "limpo"**, sem o `.venv` ativado — ative-o assim que
 > abrir cada terminal, antes de rodar qualquer comando `python`/`pip`/
@@ -109,7 +109,7 @@ Pré-requisitos: **Python 3.12+**, **Docker** (para o Redis) e **git**.
 > source .venv/bin/activate
 > ```
 >
-> Sempre que este guia disser **"abra um novo terminal"** (🆕), lembre-se de
+> Sempre que este guia disser **"abra um novo terminal"**, lembre-se de
 > ativar o `.venv` nele antes de continuar.
 
 ```bash
@@ -156,20 +156,20 @@ então precisam ser janelas/abas diferentes. **Em cada um, ative o `.venv`
 primeiro** (veja o aviso acima).
 
 ```bash
-# 🆕 Terminal A — API REST (lembre-se de ativar o .venv antes)
+# Terminal A — API REST (lembre-se de ativar o .venv antes)
 uvicorn app.api_rest:app --reload --port 8000
 # docs interativas em http://localhost:8000/docs
 ```
 
 ```bash
-# 🆕 Terminal B — worker (lembre-se de ativar o .venv antes)
+# Terminal B — worker (lembre-se de ativar o .venv antes)
 # pode rodar mais de um, em terminais diferentes (cada um com o .venv
 # ativado), para demonstrar divisão de carga
 python -m app.worker
 ```
 
 ```bash
-# 🆕 Terminal C — servidor gRPC (lembre-se de ativar o .venv antes)
+# Terminal C — servidor gRPC (lembre-se de ativar o .venv antes)
 python -m app.servidor_grpc
 # escutando em localhost:50051
 ```
@@ -178,7 +178,7 @@ python -m app.servidor_grpc
 
 ## Testando a API
 
-Com os três processos do passo anterior no ar, abra um **🆕 quarto terminal**
+Com os três processos do passo anterior no ar, abra um **quarto terminal**
 (ative o `.venv` antes, como sempre) e rode:
 
 ```bash
@@ -236,7 +236,7 @@ em `TAREFAS.md`:
     -H "Content-Type: application/json" \
     -d "{\"textos\": [\"otimo produto\", \"pessimo atendimento\"]}"
   ```
-- **Divisão de carga entre workers** — abra 🆕 mais terminais (com o `.venv`
+- **Divisão de carga entre workers** — abra mais terminais (com o `.venv`
   ativado em cada um) e rode `python -m app.worker` em cada um; todos
   competem pela mesma fila Redis via `BLPOP`, então cada tarefa é processada
   por apenas um worker.
