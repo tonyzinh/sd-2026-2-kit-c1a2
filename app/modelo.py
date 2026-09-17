@@ -9,6 +9,7 @@ Voce NAO precisa entender machine learning para usar isto.
 So precisa saber: carregar_modelo() devolve um objeto com .prever(texto).
 """
 import os
+from functools import lru_cache
 from typing import Protocol
 
 import joblib
@@ -68,6 +69,29 @@ class ModeloSentimento:
         }
 
 
+class ModeloComCache:
+    """Extensao opcional: reaproveita o resultado para textos repetidos.
+
+    O modelo e deterministico (mesmo texto -> mesma saida), entao e seguro
+    guardar o resultado em memoria por processo (REST, worker e gRPC cada
+    um mantem o seu) e devolver sem rodar o pipeline de novo.
+    """
+
+    def __init__(
+        self,
+        modelo: ModeloPrevisor,
+        tamanho_cache: int = 512,
+    ) -> None:
+        self._prever_cacheado = lru_cache(maxsize=tamanho_cache)(
+            modelo.prever,
+        )
+
+    def prever(self, texto: str) -> dict:
+        # copia o dict cacheado: quem chama costuma acrescentar campos
+        # (status, tempo_ms) e isso nao pode vazar para o valor em cache.
+        return dict(self._prever_cacheado(texto))
+
+
 def _treinar() -> Pipeline:
     textos = [t for t, _ in TREINO]
     rotulos = [r for _, r in TREINO]
@@ -80,13 +104,13 @@ def _treinar() -> Pipeline:
     return pipe
 
 
-def carregar_modelo() -> ModeloSentimento:
+def carregar_modelo() -> ModeloPrevisor:
     """Carrega o modelo do disco; treina na primeira vez. CHAME UMA VEZ SO."""
     if os.path.exists(CAMINHO):
         pipe = joblib.load(CAMINHO)
     else:
         pipe = _treinar()
-    return ModeloSentimento(pipe)
+    return ModeloComCache(ModeloSentimento(pipe))
 
 
 if __name__ == "__main__":

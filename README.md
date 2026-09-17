@@ -16,6 +16,7 @@ inferência terminar.
 - [Tratamento de falhas](#tratamento-de-falhas)
 - [Como executar do zero](#como-executar-do-zero)
 - [Testando a API](#testando-a-api)
+- [Extensões opcionais implementadas](#extensões-opcionais-implementadas)
 - [Rodando os testes automatizados](#rodando-os-testes-automatizados)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Referência das rotas REST](#referência-das-rotas-rest)
@@ -95,6 +96,22 @@ Implementado em `worker.py`:
 
 Pré-requisitos: **Python 3.12+**, **Docker** (para o Redis) e **git**.
 
+> ⚠️ **Importante — ambiente virtual (`.venv`):** este projeto usa vários
+> processos rodando ao mesmo tempo, cada um no seu próprio terminal. **Todo
+> terminal novo abre "limpo"**, sem o `.venv` ativado — ative-o assim que
+> abrir cada terminal, antes de rodar qualquer comando `python`/`pip`/
+> `uvicorn`. Se o prompt não começar com `(.venv)`, ative com:
+>
+> ```bash
+> # Windows (PowerShell):
+> .venv\Scripts\activate
+> # Linux/macOS:
+> source .venv/bin/activate
+> ```
+>
+> Sempre que este guia disser **"abra um novo terminal"** (🆕), lembre-se de
+> ativar o `.venv` nele antes de continuar.
+
 ```bash
 # 1. Clone o repositório e entre na pasta
 git clone <url-do-seu-repositorio>
@@ -134,22 +151,25 @@ python -m grpc_tools.protoc -I proto --python_out=. --grpc_python_out=. proto/in
 # Linux/macOS: bash scripts/gerar_stubs.sh
 ```
 
-Agora abra **três terminais** (todos com o `.venv` ativado):
+Agora abra **três terminais** — cada um fica ocupado rodando o seu processo,
+então precisam ser janelas/abas diferentes. **Em cada um, ative o `.venv`
+primeiro** (veja o aviso acima).
 
 ```bash
-# Terminal A — API REST
+# 🆕 Terminal A — API REST (lembre-se de ativar o .venv antes)
 uvicorn app.api_rest:app --reload --port 8000
 # docs interativas em http://localhost:8000/docs
 ```
 
 ```bash
-# Terminal B — worker (pode rodar mais de um, em terminais diferentes,
-# para demonstrar divisão de carga)
+# 🆕 Terminal B — worker (lembre-se de ativar o .venv antes)
+# pode rodar mais de um, em terminais diferentes (cada um com o .venv
+# ativado), para demonstrar divisão de carga
 python -m app.worker
 ```
 
 ```bash
-# Terminal C — servidor gRPC
+# 🆕 Terminal C — servidor gRPC (lembre-se de ativar o .venv antes)
 python -m app.servidor_grpc
 # escutando em localhost:50051
 ```
@@ -158,7 +178,8 @@ python -m app.servidor_grpc
 
 ## Testando a API
 
-Com os três processos do passo anterior no ar, em um quarto terminal:
+Com os três processos do passo anterior no ar, abra um **🆕 quarto terminal**
+(ative o `.venv` antes, como sempre) e rode:
 
 ```bash
 # fluxo síncrono + assíncrono, usando o cliente de exemplo
@@ -191,6 +212,37 @@ curl http://localhost:8000/saude
 
 ---
 
+## Extensões opcionais implementadas
+
+Além do núcleo obrigatório, este projeto implementa as extensões sugeridas
+em `TAREFAS.md`:
+
+- **Cache de resultados para textos repetidos** — `ModeloComCache`
+  (`app/modelo.py`) envolve o modelo e reaproveita o resultado quando o
+  mesmo texto é enviado de novo, sem rodar o pipeline outra vez. O cache é
+  por processo (REST, cada worker e o servidor gRPC têm o seu).
+- **Latência média das inferências** — `GET /metricas` devolve
+  `{"contagem": ..., "latencia_media_ms": ...}`, agregando **todas as
+  instâncias** (REST, gRPC e workers) através de contadores no Redis
+  (`app/fila.py`).
+  ```bash
+  curl http://localhost:8000/metricas
+  ```
+- **Processamento em lote pela interface REST** — `POST /predict-lote`
+  recebe vários textos numa única chamada e devolve um resultado para cada
+  um (equivalente ao RPC gRPC `PreverLote`).
+  ```bash
+  curl -X POST http://localhost:8000/predict-lote \
+    -H "Content-Type: application/json" \
+    -d "{\"textos\": [\"otimo produto\", \"pessimo atendimento\"]}"
+  ```
+- **Divisão de carga entre workers** — abra 🆕 mais terminais (com o `.venv`
+  ativado em cada um) e rode `python -m app.worker` em cada um; todos
+  competem pela mesma fila Redis via `BLPOP`, então cada tarefa é processada
+  por apenas um worker.
+
+---
+
 ## Rodando os testes automatizados
 
 ```bash
@@ -199,6 +251,8 @@ pytest
 
 - `tests/test_inferencia_service.py` — validação de texto, erros de fila.
 - `tests/test_worker.py` — processamento, retentativa e dead-letter do worker.
+- `tests/test_modelo_cache.py` — cache de resultados para textos repetidos.
+- `tests/test_api_rest.py` — rotas `/predict-lote` e `/metricas`.
 - `tests/test_paridade_rest_grpc.py` — garante que REST e gRPC devolvem o
   **mesmo resultado** para o mesmo texto (é pulado automaticamente se os
   stubs gRPC ainda não foram gerados — veja o passo 6 acima).
@@ -238,8 +292,10 @@ sd-2026-2-kit-c1a2/
 |---|---|---|---|
 | `GET` | `/saude` | Verifica se a API está ativa e o modelo carregado | `200` |
 | `POST` | `/predict-sync` | Executa a inferência e espera o resultado | `200` com resultado |
+| `POST` | `/predict-lote` | Executa a inferência para vários textos numa chamada | `200` com lista de resultados |
 | `POST` | `/predict` | Enfileira a inferência e devolve na hora | `202` com `{"id": ...}` |
 | `GET` | `/resultado/{id}` | Consulta status/resultado de uma tarefa | `200` (status variável) ou `404` |
+| `GET` | `/metricas` | Contagem e latência média das inferências (todas as instâncias) | `200` |
 
 Documentação interativa (Swagger) em `http://localhost:8000/docs` com o
 serviço no ar.
@@ -275,6 +331,10 @@ pois o objetivo aqui é demonstrar uma segunda tecnologia de comunicação
 - **Escalabilidade horizontal do worker:** como o consumo usa `BLPOP` (bloqueio
   atômico no Redis), múltiplas instâncias de `worker.py` podem rodar ao mesmo
   tempo sem processar a mesma tarefa duas vezes.
+- **Métricas nunca derrubam uma requisição:** `fila.registrar_latencia` e
+  `fila.obter_metricas` capturam falhas do Redis (`RedisError`) e voltam um
+  valor neutro em vez de propagar o erro — são um complemento observacional,
+  não um requisito para a inferência funcionar.
 
 ---
 

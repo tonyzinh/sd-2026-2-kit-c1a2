@@ -21,6 +21,7 @@ from concurrent import futures
 
 import grpc
 
+from app import fila
 from app.modelo import carregar_modelo
 from app.services.inferencia_service import TextoInvalidoError, validar_texto
 
@@ -110,6 +111,8 @@ class ServicoInferencia(
                 2,
             )
 
+            fila.registrar_latencia(tempo_ms)
+
             logger.info(
                 "gRPC Prever | tamanho=%s | tempo_ms=%s",
                 len(texto_validado),
@@ -170,6 +173,8 @@ class ServicoInferencia(
                 (time.perf_counter() - inicio) * 1000,
                 2,
             )
+
+            fila.registrar_latencia(tempo_ms)
 
             logger.info(
                 "gRPC PreverLote | quantidade=%s | tempo_ms=%s",

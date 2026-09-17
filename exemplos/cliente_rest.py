@@ -16,7 +16,6 @@ def sincrono(texto):
 
 
 def assincrono(texto):
-    """So funciona depois que voce completar as TAREFAS 1, 2 e 3."""
     r = requests.post(f"{BASE}/predict", json={"texto": texto}, timeout=10)
     r.raise_for_status()
     tarefa_id = r.json()["id"]
@@ -38,4 +37,4 @@ if __name__ == "__main__":
     try:
         assincrono(texto)
     except Exception as e:  # noqa: BLE001
-        print("(fluxo assincrono ainda nao implementado:", e, ")")
+        print("(falha no fluxo assincrono:", e, ")")

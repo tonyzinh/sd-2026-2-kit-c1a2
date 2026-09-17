@@ -1,13 +1,12 @@
 """
 Interface REST do servico de inferencia.
 
-O QUE JA ESTA PRONTO:
 - carregamento do modelo UMA vez, na subida
-- rota sincrona /predict-sync, usada no laboratorio da Aula 6
-
-TAREFAS:
-- POST /predict -> colocar na fila e devolver o id
-- GET /resultado/{id} -> devolver o resultado quando estiver pronto
+- POST /predict-sync -> inferencia sincrona
+- POST /predict-lote -> inferencia sincrona para varios textos (extensao)
+- POST /predict -> enfileira a tarefa e devolve o id (assincrono)
+- GET /resultado/{id} -> devolve o resultado quando estiver pronto
+- GET /metricas -> contagem e latencia media das inferencias (extensao)
 
 Rodar:
     uvicorn app.api_rest:app --reload --host 0.0.0.0 --port 8000
@@ -23,7 +22,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.modelo import ModeloSentimento, carregar_modelo
+from app import fila
+from app.modelo import ModeloPrevisor, carregar_modelo
 from app.services.inferencia_service import (
     FilaIndisponivelError,
     TarefaNaoEncontradaError,
@@ -47,14 +47,18 @@ app = FastAPI(
 )
 
 
-modelo: ModeloSentimento | None = None
+modelo: ModeloPrevisor | None = None
 
 
 class Entrada(BaseModel):
     texto: str
 
 
-def obter_modelo() -> ModeloSentimento:
+class EntradaLote(BaseModel):
+    textos: list[str]
+
+
+def obter_modelo() -> ModeloPrevisor:
     """Devolve o modelo carregado ou falha se o startup ainda nao rodou."""
     if modelo is None:
         raise RuntimeError("Modelo ainda nao foi carregado.")
@@ -175,6 +179,8 @@ def predict_sync(entrada: Entrada) -> dict:
         2,
     )
 
+    fila.registrar_latencia(resultado["tempo_ms"])
+
     logger.info(
         "REST POST /predict-sync | tamanho=%s | tempo_ms=%s",
         len(texto_validado),
@@ -182,6 +188,48 @@ def predict_sync(entrada: Entrada) -> dict:
     )
 
     return resultado
+
+
+@app.post("/predict-lote")
+def predict_lote(entrada: EntradaLote) -> dict:
+    """
+    Extensao opcional: executa a inferencia (sincrona) para varios textos
+    numa unica chamada REST. Equivalente ao RPC gRPC PreverLote.
+    """
+    inicio = time.perf_counter()
+
+    textos_validados = [validar_texto(texto) for texto in entrada.textos]
+
+    resultados = [
+        obter_modelo().prever(texto) for texto in textos_validados
+    ]
+
+    tempo_ms = round(
+        (time.perf_counter() - inicio) * 1000,
+        2,
+    )
+
+    fila.registrar_latencia(tempo_ms)
+
+    logger.info(
+        "REST POST /predict-lote | quantidade=%s | tempo_ms=%s",
+        len(textos_validados),
+        tempo_ms,
+    )
+
+    return {
+        "resultados": resultados,
+        "tempo_ms": tempo_ms,
+    }
+
+
+@app.get("/metricas")
+def metricas() -> dict:
+    """
+    Extensao opcional: numero de inferencias processadas e a latencia media,
+    agregados entre TODAS as instancias (REST, gRPC e workers).
+    """
+    return fila.obter_metricas()
 
 
 @app.post("/predict", status_code=202)

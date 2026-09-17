@@ -45,6 +45,8 @@ def executar_inferencia(modelo: ModeloPrevisor, texto: str) -> dict:
         2,
     )
 
+    fila.registrar_latencia(resultado["tempo_ms"])
+
     return resultado
 
 
