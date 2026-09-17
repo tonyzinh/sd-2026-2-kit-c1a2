@@ -1,3 +1,5 @@
+from redis.exceptions import RedisError
+
 from app import fila
 
 
@@ -25,7 +27,7 @@ def enfileirar_inferencia(texto: str) -> str:
     """Coloca uma inferência na fila."""
     try:
         return fila.enfileirar(texto)
-    except Exception as exc:
+    except RedisError as exc:
         raise FilaIndisponivelError(
             "Não foi possível enviar a tarefa para processamento."
         ) from exc
@@ -41,7 +43,7 @@ def consultar_resultado(tarefa_id: str) -> dict:
     """Consulta o estado ou resultado de uma tarefa."""
     try:
         resultado = fila.buscar_resultado(tarefa_id)
-    except Exception as exc:
+    except RedisError as exc:
         raise FilaIndisponivelError(
             "Não foi possível consultar a tarefa."
         ) from exc

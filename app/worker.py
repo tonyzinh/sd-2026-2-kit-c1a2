@@ -19,8 +19,7 @@ import logging
 import time
 
 from app import fila
-from app.modelo import carregar_modelo
-
+from app.modelo import ModeloPrevisor, carregar_modelo
 
 MAX_TENTATIVAS = 3
 FILA_DEAD_LETTER = "tarefas:dead-letter"
@@ -34,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def executar_inferencia(modelo, texto: str) -> dict:
+def executar_inferencia(modelo: ModeloPrevisor, texto: str) -> dict:
     """Executa a inferencia e devolve o resultado com a latencia."""
     inicio = time.perf_counter()
 
@@ -57,7 +56,7 @@ def salvar_resultado(tarefa_id: str, resultado: dict) -> None:
     )
 
 
-def obter_tarefa():
+def obter_tarefa() -> dict | None:
     """Obtém a próxima tarefa pendente."""
     return fila.proxima_tarefa(timeout=5)
 
@@ -168,7 +167,7 @@ def processar_falha(
 
 
 def processar_tarefa(
-    modelo,
+    modelo: ModeloPrevisor,
     tarefa: dict,
 ) -> None:
     """Coordena o processamento de uma única tarefa."""

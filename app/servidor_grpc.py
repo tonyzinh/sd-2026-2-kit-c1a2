@@ -22,7 +22,7 @@ from concurrent import futures
 import grpc
 
 from app.modelo import carregar_modelo
-
+from app.services.inferencia_service import TextoInvalidoError, validar_texto
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,13 +43,13 @@ except ImportError:
         "--python_out=. "
         "--grpc_python_out=. "
         "proto/inferencia.proto"
-    )
+    ) from None
 
 
 class ServicoInferencia(
     inferencia_pb2_grpc.InferenciaServicer
 ):
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Carrega o modelo uma unica vez na inicializacao do servidor.
         """
@@ -66,7 +66,7 @@ class ServicoInferencia(
     def _converter_resposta(
         self,
         resultado: dict,
-    ):
+    ) -> inferencia_pb2.RespostaPrever:
         """
         Converte o resultado do modelo para mensagem protobuf.
         """
@@ -78,17 +78,31 @@ class ServicoInferencia(
 
     def Prever(
         self,
-        request,
-        context,
-    ):
+        request: inferencia_pb2.PedidoPrever,
+        context: grpc.ServicerContext,
+    ) -> inferencia_pb2.RespostaPrever:
         """
         Executa inferencia para um unico texto.
         """
         inicio = time.perf_counter()
 
         try:
+            texto_validado = validar_texto(request.texto)
+        except TextoInvalidoError as erro:
+            logger.warning(
+                "gRPC Prever texto invalido | erro=%s",
+                erro,
+            )
+
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                str(erro),
+            )
+            raise
+
+        try:
             resultado = self.modelo.prever(
-                request.texto,
+                texto_validado,
             )
 
             tempo_ms = round(
@@ -98,7 +112,7 @@ class ServicoInferencia(
 
             logger.info(
                 "gRPC Prever | tamanho=%s | tempo_ms=%s",
-                len(request.texto),
+                len(texto_validado),
                 tempo_ms,
             )
 
@@ -116,23 +130,40 @@ class ServicoInferencia(
                 grpc.StatusCode.INTERNAL,
                 "Falha ao processar inferencia.",
             )
+            raise
 
     def PreverLote(
         self,
-        request,
-        context,
-    ):
+        request: inferencia_pb2.PedidoLote,
+        context: grpc.ServicerContext,
+    ) -> inferencia_pb2.RespostaLote:
         """
         Executa inferencia para varios textos.
         """
         inicio = time.perf_counter()
 
         try:
+            textos_validados = [
+                validar_texto(texto) for texto in request.textos
+            ]
+        except TextoInvalidoError as erro:
+            logger.warning(
+                "gRPC PreverLote texto invalido | erro=%s",
+                erro,
+            )
+
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                str(erro),
+            )
+            raise
+
+        try:
             resultados = [
                 self._converter_resposta(
                     self.modelo.prever(texto)
                 )
-                for texto in request.textos
+                for texto in textos_validados
             ]
 
             tempo_ms = round(
@@ -142,7 +173,7 @@ class ServicoInferencia(
 
             logger.info(
                 "gRPC PreverLote | quantidade=%s | tempo_ms=%s",
-                len(request.textos),
+                len(textos_validados),
                 tempo_ms,
             )
 
@@ -160,11 +191,12 @@ class ServicoInferencia(
                 grpc.StatusCode.INTERNAL,
                 "Falha ao processar lote.",
             )
+            raise
 
 
 def servir(
     porta: int = 50051,
-):
+) -> None:
     """
     Inicializa e mantem o servidor gRPC em execucao.
     """

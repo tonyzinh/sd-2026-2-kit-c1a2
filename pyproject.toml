@@ -1,0 +1,33 @@
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+exclude = ["^\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = "app.*"
+disallow_untyped_defs = true
+
+# inferencia_pb2*.py sao gerados pelo protoc (nao fazem parte do
+# codigo-fonte versionado, veja .gitignore) e nao tem stubs de tipo.
+[[tool.mypy.overrides]]
+module = ["inferencia_pb2", "inferencia_pb2_grpc"]
+ignore_errors = true
+
+# grpc_tools gera as classes de mensagem dinamicamente; sem o plugin
+# mypy-protobuf, o mypy nao enxerga seus atributos estaticamente.
+[[tool.mypy.overrides]]
+module = "app.servidor_grpc"
+disable_error_code = ["attr-defined", "name-defined"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

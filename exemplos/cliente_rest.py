@@ -8,7 +8,9 @@ BASE = "http://localhost:8000"
 
 
 def sincrono(texto):
-    r = requests.post(f"{BASE}/predict-sync", json={"texto": texto}, timeout=10)
+    r = requests.post(
+        f"{BASE}/predict-sync", json={"texto": texto}, timeout=10
+    )
     r.raise_for_status()
     print("sincrono:", r.json())
 

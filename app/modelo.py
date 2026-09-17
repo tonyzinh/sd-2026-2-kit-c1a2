@@ -9,12 +9,22 @@ Voce NAO precisa entender machine learning para usar isto.
 So precisa saber: carregar_modelo() devolve um objeto com .prever(texto).
 """
 import os
+from typing import Protocol
+
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline, make_pipeline
 
 CAMINHO = os.path.join(os.path.dirname(__file__), "modelo.joblib")
+
+
+class ModeloPrevisor(Protocol):
+    """Interface minima que api_rest.py, worker.py e servidor_grpc.py
+    exigem de um modelo: apenas o metodo prever(). Permite usar duplos
+    de teste sem depender da classe concreta ModeloSentimento."""
+
+    def prever(self, texto: str) -> dict: ...
 
 # Mini base de treino embutida (suficiente para a disciplina).
 TREINO = [
@@ -44,7 +54,7 @@ TREINO = [
 class ModeloSentimento:
     """Envolve o pipeline treinado. Use apenas o metodo prever()."""
 
-    def __init__(self, pipeline):
+    def __init__(self, pipeline: Pipeline) -> None:
         self._pipeline = pipeline
 
     def prever(self, texto: str) -> dict:
@@ -58,7 +68,7 @@ class ModeloSentimento:
         }
 
 
-def _treinar():
+def _treinar() -> Pipeline:
     textos = [t for t, _ in TREINO]
     rotulos = [r for _, r in TREINO]
     pipe = make_pipeline(

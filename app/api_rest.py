@@ -19,19 +19,19 @@ Docs:
 import logging
 import time
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.modelo import carregar_modelo
+from app.modelo import ModeloSentimento, carregar_modelo
 from app.services.inferencia_service import (
     FilaIndisponivelError,
     TarefaNaoEncontradaError,
     TextoInvalidoError,
     consultar_resultado,
     submeter_inferencia,
+    validar_texto,
 )
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,18 +47,25 @@ app = FastAPI(
 )
 
 
-modelo = None
+modelo: ModeloSentimento | None = None
 
 
 class Entrada(BaseModel):
     texto: str
 
 
+def obter_modelo() -> ModeloSentimento:
+    """Devolve o modelo carregado ou falha se o startup ainda nao rodou."""
+    if modelo is None:
+        raise RuntimeError("Modelo ainda nao foi carregado.")
+    return modelo
+
+
 @app.exception_handler(TextoInvalidoError)
 async def tratar_texto_invalido(
     request: Request,
     exc: TextoInvalidoError,
-):
+) -> JSONResponse:
     logger.warning(
         "REST erro de validacao | rota=%s | erro=%s",
         request.url.path,
@@ -77,7 +84,7 @@ async def tratar_texto_invalido(
 async def tratar_tarefa_nao_encontrada(
     request: Request,
     exc: TarefaNaoEncontradaError,
-):
+) -> JSONResponse:
     logger.warning(
         "REST tarefa nao encontrada | rota=%s | erro=%s",
         request.url.path,
@@ -96,7 +103,7 @@ async def tratar_tarefa_nao_encontrada(
 async def tratar_fila_indisponivel(
     request: Request,
     exc: FilaIndisponivelError,
-):
+) -> JSONResponse:
     logger.error(
         "REST fila indisponivel | rota=%s | erro=%s",
         request.url.path,
@@ -112,7 +119,7 @@ async def tratar_fila_indisponivel(
 
 
 @app.on_event("startup")
-def _subir():
+def _subir() -> None:
     """
     Carrega o modelo uma unica vez no startup.
     """
@@ -134,7 +141,7 @@ def _subir():
 
 
 @app.get("/saude")
-def saude():
+def saude() -> dict:
     """
     Informa se a API esta ativa e se o modelo foi carregado.
     """
@@ -150,21 +157,17 @@ def saude():
 
 
 @app.post("/predict-sync")
-def predict_sync(entrada: Entrada):
+def predict_sync(entrada: Entrada) -> dict:
     """
     Executa inferencia sincrona.
     O cliente aguarda a resposta.
     """
-    if not entrada.texto.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="texto vazio",
-        )
+    texto_validado = validar_texto(entrada.texto)
 
     inicio = time.perf_counter()
 
-    resultado = modelo.prever(
-        entrada.texto,
+    resultado = obter_modelo().prever(
+        texto_validado,
     )
 
     resultado["tempo_ms"] = round(
@@ -174,7 +177,7 @@ def predict_sync(entrada: Entrada):
 
     logger.info(
         "REST POST /predict-sync | tamanho=%s | tempo_ms=%s",
-        len(entrada.texto),
+        len(texto_validado),
         resultado["tempo_ms"],
     )
 
@@ -182,7 +185,7 @@ def predict_sync(entrada: Entrada):
 
 
 @app.post("/predict", status_code=202)
-def predict(entrada: Entrada):
+def predict(entrada: Entrada) -> dict:
     """
     Submete uma inferencia para processamento assincrono.
     """
@@ -210,7 +213,7 @@ def predict(entrada: Entrada):
 
 
 @app.get("/resultado/{tarefa_id}")
-def resultado(tarefa_id: str):
+def resultado(tarefa_id: str) -> dict:
     """
     Consulta o estado ou resultado de uma inferencia.
     """
